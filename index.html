@@ -44,7 +44,7 @@
         <!-- Header -->
         <div class="bg-gray-800 text-white p-6 border-b-4 border-blue-500">
             <h1 class="text-2xl font-bold tracking-wider uppercase">Label Splitter 4.0</h1>
-            <p class="text-gray-400 text-sm mt-1">PRODUCTION-READY THERMAL CONVERTER</p>
+            <p class="text-gray-400 text-sm mt-1">PRODUCTION-READY THERMAL CONVERTER (NO STRETCH)</p>
         </div>
 
         <div class="p-8">
@@ -88,7 +88,7 @@
         const CM_TO_PT = 28.3465;
         const IN_TO_PT = 72;
 
-        // EXACT crop presets as provided
+        // EXACT CROP PRESETS (cm)
         const LABELS = [
             { top: 0.18, bottom: 20.32, left: 2.91, right: 10.40 }, // Label 1
             { top: 0.18, bottom: 20.32, left: 10.32, right: 2.99 }, // Label 2
@@ -142,13 +142,6 @@
                 for (let j = 0; j < LABELS.length; j++) {
                     const l = LABELS[j];
                     
-                    // CROP FORMULA:
-                    // x_start = Left
-                    // y_start = Top
-                    // x_end = Page_Width - Right
-                    // y_end = Page_Height - Bottom
-                    // Note: PDFLib uses 0,0 at bottom-left
-                    
                     const cropBox = {
                         left: l.left * CM_TO_PT,
                         bottom: l.bottom * CM_TO_PT,
@@ -161,12 +154,33 @@
                     // Create EXACT 4x6 inch page (72 points per inch)
                     const newPage = outPdf.addPage([4 * IN_TO_PT, 6 * IN_TO_PT]);
 
+                    // -------- NO STRETCH LOGIC --------
+                    const pageW = newPage.getWidth();
+                    const pageH = newPage.getHeight();
+
+                    const labelW = embedded.width;
+                    const labelH = embedded.height;
+
+                    // Calculate proportional scale to fit within page bounds
+                    const scale = Math.min(
+                        pageW / labelW,
+                        pageH / labelH
+                    );
+
+                    const drawW = labelW * scale;
+                    const drawH = labelH * scale;
+
+                    // Center the label on the 4x6 page
+                    const x = (pageW - drawW) / 2;
+                    const y = (pageH - drawH) / 2;
+
                     newPage.drawPage(embedded, {
-                        x: 0,
-                        y: 0,
-                        width: newPage.getWidth(),
-                        height: newPage.getHeight()
+                        x: x,
+                        y: y,
+                        width: drawW,
+                        height: drawH
                     });
+                    // ---------------------------------
 
                     totalLabelsProcessed++;
                 }
