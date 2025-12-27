@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Courier Label Splitter (4×6)</title>
+    
+    <!-- Tailwind CSS for Industrial UI -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- PDF-Lib for Client-Side Manipulation -->
+    <script src="https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
+
+    <style>
+        body {
+            font-family: 'Courier New', Courier, monospace;
+            background-color: #f5f5f5;
+        }
+        .console-log {
+            background-color: #1a1a1a;
+            color: #00ff00;
+            font-family: 'Courier New', monospace;
+            padding: 1rem;
+            border-radius: 0.25rem;
+            height: 180px;
+            overflow-y: auto;
+            font-size: 0.85rem;
+            border: 1px solid #333;
+        }
+        .drop-zone {
+            transition: all 0.3s ease;
+        }
+        .drop-zone:hover {
+            border-color: #3b82f6;
+            background-color: #eff6ff;
+        }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col items-center justify-center p-4">
+
+    <!-- Main Container -->
+    <div class="bg-white w-full max-w-2xl shadow-2xl rounded-lg overflow-hidden border border-gray-300">
+        
+        <!-- Header -->
+        <div class="bg-gray-800 text-white p-6 border-b-4 border-blue-500">
+            <h1 class="text-2xl font-bold tracking-wider uppercase">Label Splitter 4.0</h1>
+            <p class="text-gray-400 text-sm mt-1">PRODUCTION-READY THERMAL CONVERTER</p>
+        </div>
+
+        <div class="p-8">
+            <!-- Upload Section -->
+            <div id="upload-section" class="mb-6">
+                <div class="drop-zone border-2 border-dashed border-gray-400 rounded-lg p-10 text-center cursor-pointer relative" onclick="document.getElementById('fileInput').click()">
+                    <input type="file" id="fileInput" accept="application/pdf" class="hidden" onchange="updateFileInfo(event)">
+                    <div class="text-gray-500">
+                        <svg class="w-12 h-12 mx-auto mb-3 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path></svg>
+                        <p class="font-bold text-lg" id="file-status">Click to Upload PDF</p>
+                        <p class="text-xs mt-2 text-gray-400">Every page must contain exactly 4 labels</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Stats Dashboard -->
+            <div id="stats" class="grid grid-cols-2 gap-4 mb-6 hidden">
+                <div class="bg-blue-50 p-4 rounded border border-blue-100">
+                    <p class="text-xs text-blue-500 uppercase font-bold">Input Pages</p>
+                    <p id="inputPagesDisplay" class="text-2xl font-bold text-gray-800">0</p>
+                </div>
+                <div class="bg-green-50 p-4 rounded border border-green-100">
+                    <p class="text-xs text-green-500 uppercase font-bold">Detected Labels</p>
+                    <p id="labelCountDisplay" class="text-2xl font-bold text-gray-800">0</p>
+                </div>
+            </div>
+
+            <!-- Log -->
+            <div id="console" class="console-log mb-6">
+                <div class="text-gray-500">System Ready...</div>
+            </div>
+
+            <!-- Action -->
+            <button id="processBtn" onclick="processPDF()" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-4 px-8 rounded shadow-lg transition-all uppercase tracking-widest">
+                Process & Split PDF
+            </button>
+        </div>
+    </div>
+
+    <script>
+        const CM_TO_PT = 28.3465;
+        const IN_TO_PT = 72;
+
+        // EXACT crop presets as provided
+        const LABELS = [
+            { top: 0.18, bottom: 20.32, left: 2.91, right: 10.40 }, // Label 1
+            { top: 0.18, bottom: 20.32, left: 10.32, right: 2.99 }, // Label 2
+            { top: 9.34, bottom: 11.17, left: 2.99, right: 10.32 }, // Label 3
+            { top: 9.34, bottom: 11.17, left: 10.40, right: 2.91 }  // Label 4
+        ];
+
+        function log(msg, color = "#00ff00") {
+            const consoleEl = document.getElementById('console');
+            const div = document.createElement('div');
+            div.style.color = color;
+            div.textContent = `> ${msg}`;
+            consoleEl.appendChild(div);
+            consoleEl.scrollTop = consoleEl.scrollHeight;
+        }
+
+        function updateFileInfo(event) {
+            const file = event.target.files[0];
+            if (file) {
+                document.getElementById('file-status').innerText = file.name;
+                log(`Selected: ${file.name}`);
+            }
+        }
+
+        async function processPDF() {
+            const fileInput = document.getElementById("fileInput");
+            if (!fileInput.files.length) {
+                log("ERROR: No file uploaded", "#ff4444");
+                return;
+            }
+
+            log("Initializing PDF processing engine...");
+            const file = fileInput.files[0];
+            const arrayBuffer = await file.arrayBuffer();
+
+            const srcPdf = await PDFLib.PDFDocument.load(arrayBuffer);
+            const outPdf = await PDFLib.PDFDocument.create();
+            const pages = srcPdf.getPages();
+            
+            document.getElementById('stats').classList.remove('hidden');
+            document.getElementById('inputPagesDisplay').innerText = pages.length;
+            document.getElementById('labelCountDisplay').innerText = pages.length * 4;
+
+            let totalLabelsProcessed = 0;
+
+            for (let i = 0; i < pages.length; i++) {
+                const page = pages[i];
+                const { width, height } = page.getSize();
+                log(`Analyzing Page ${i + 1}...`);
+
+                for (let j = 0; j < LABELS.length; j++) {
+                    const l = LABELS[j];
+                    
+                    // CROP FORMULA:
+                    // x_start = Left
+                    // y_start = Top
+                    // x_end = Page_Width - Right
+                    // y_end = Page_Height - Bottom
+                    // Note: PDFLib uses 0,0 at bottom-left
+                    
+                    const cropBox = {
+                        left: l.left * CM_TO_PT,
+                        bottom: l.bottom * CM_TO_PT,
+                        right: width - (l.right * CM_TO_PT),
+                        top: height - (l.top * CM_TO_PT)
+                    };
+
+                    const [embedded] = await outPdf.embedPages([page], [cropBox]);
+
+                    // Create EXACT 4x6 inch page (72 points per inch)
+                    const newPage = outPdf.addPage([4 * IN_TO_PT, 6 * IN_TO_PT]);
+
+                    newPage.drawPage(embedded, {
+                        x: 0,
+                        y: 0,
+                        width: newPage.getWidth(),
+                        height: newPage.getHeight()
+                    });
+
+                    totalLabelsProcessed++;
+                }
+            }
+
+            // MANDATORY VALIDATION
+            log(`Validating output: ${totalLabelsProcessed} / ${pages.length * 4}`);
+            if (totalLabelsProcessed !== pages.length * 4) {
+                log("INVALID OUTPUT: MULTIPLE LABELS DETECTED", "#ff4444");
+                alert("INVALID OUTPUT: MULTIPLE LABELS DETECTED");
+                return;
+            }
+
+            const pdfBytes = await outPdf.save();
+            const blob = new Blob([pdfBytes], { type: "application/pdf" });
+            const url = URL.createObjectURL(blob);
+
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = `converted_labels_4x6.pdf`;
+            a.click();
+
+            log(`SUCCESS: ${totalLabelsProcessed} Labels generated. File downloaded.`, "#00ff00");
+        }
+    </script>
+</body>
+</html>
