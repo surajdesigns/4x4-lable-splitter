@@ -1,275 +1,1219 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Courier Label Splitter (4×6)</title>
-    
-    <!-- Tailwind CSS for Modern UI -->
-    <script src="https://cdn.tailwindcss.com"></script>
-    
-    <!-- PDF-Lib for Client-Side Manipulation -->
-    <script src="https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>AutoSplit — Courier Label Intelligence Engine</title>
 
-    <style>
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+<!-- Google Fonts: Syne (display) + DM Mono (mono) -->
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Mono:wght@300;400;500&display=swap" rel="stylesheet" />
 
-        body {
-            font-family: 'Inter', sans-serif;
-            background-color: #f8fafc;
-            background-image: radial-gradient(#e2e8f0 1px, transparent 1px);
-            background-size: 24px 24px;
-        }
+<!-- PDF.js (render pages → canvas) -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 
-        .glass-card {
-            background: rgba(255, 255, 255, 0.9);
-            backdrop-filter: blur(10px);
-            border: 1px solid rgba(255, 255, 255, 0.5);
-        }
+<!-- PDF-Lib (create output PDF) -->
+<script src="https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
 
-        .console-log {
-            background-color: #0f172a;
-            color: #38bdf8;
-            font-family: 'JetBrains Mono', monospace;
-            padding: 1.25rem;
-            border-radius: 0.75rem;
-            height: 220px;
-            overflow-y: auto;
-            font-size: 0.8rem;
-            border: 1px solid #1e293b;
-            box-shadow: inset 0 2px 4px 0 rgba(0, 0, 0, 0.06);
-        }
+<!-- OpenCV.js (computer vision) — loaded asynchronously below -->
 
-        .console-log::-webkit-scrollbar {
-            width: 8px;
-        }
+<style>
+/* =====================================================
+   DESIGN SYSTEM — Industrial Precision Aesthetic
+   Dark steel + electric amber + cold white
+   ===================================================== */
+:root {
+  --bg:        #0a0a0b;
+  --surface:   #111114;
+  --surface2:  #18181c;
+  --border:    #2a2a32;
+  --border2:   #3a3a45;
+  --text:      #e8e8f0;
+  --muted:     #6b6b7e;
+  --accent:    #f59e0b;       /* amber */
+  --accent2:   #fbbf24;
+  --green:     #22c55e;
+  --red:       #ef4444;
+  --blue:      #60a5fa;
+  --font-disp: 'Syne', sans-serif;
+  --font-mono: 'DM Mono', monospace;
+}
 
-        .console-log::-webkit-scrollbar-thumb {
-            background: #334155;
-            border-radius: 10px;
-        }
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
-        .drop-zone {
-            transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
-        }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-disp);
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem 1rem;
+  overflow-x: hidden;
+}
 
-        .drop-zone:hover {
-            border-color: #3b82f6;
-            background-color: #f0f7ff;
-            transform: translateY(-2px);
-        }
+/* Background grid texture */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background-image:
+    linear-gradient(rgba(245,158,11,.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(245,158,11,.03) 1px, transparent 1px);
+  background-size: 40px 40px;
+  pointer-events: none;
+  z-index: 0;
+}
 
-        .btn-gradient {
-            background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
-            transition: all 0.3s ease;
-        }
+/* Amber glow blob top-right */
+body::after {
+  content: '';
+  position: fixed;
+  top: -200px; right: -200px;
+  width: 600px; height: 600px;
+  background: radial-gradient(circle, rgba(245,158,11,.08) 0%, transparent 70%);
+  pointer-events: none;
+  z-index: 0;
+}
 
-        .btn-gradient:hover {
-            box-shadow: 0 10px 15px -3px rgba(37, 99, 235, 0.3);
-            transform: scale(1.01);
-        }
+/* ---- SHELL ---- */
+.shell {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  max-width: 680px;
+}
 
-        .btn-gradient:active {
-            transform: scale(0.99);
-        }
-    </style>
+/* ---- HEADER ---- */
+.header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-bottom: 2rem;
+}
+.header-left {}
+.logo {
+  font-size: 2.4rem;
+  font-weight: 800;
+  letter-spacing: -0.04em;
+  line-height: 1;
+  color: var(--text);
+}
+.logo span { color: var(--accent); }
+.tagline {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: var(--muted);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  margin-top: 0.4rem;
+}
+.badge {
+  font-family: var(--font-mono);
+  font-size: 0.65rem;
+  background: rgba(245,158,11,.12);
+  color: var(--accent);
+  border: 1px solid rgba(245,158,11,.25);
+  padding: 0.3rem 0.7rem;
+  border-radius: 4px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+/* ---- CARD ---- */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  overflow: hidden;
+}
+
+/* ---- DROP ZONE ---- */
+.drop-zone {
+  padding: 3.5rem 2rem;
+  text-align: center;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  transition: background .25s, border-color .25s;
+  position: relative;
+  overflow: hidden;
+}
+.drop-zone::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(ellipse at center, rgba(245,158,11,.04) 0%, transparent 70%);
+  opacity: 0;
+  transition: opacity .3s;
+}
+.drop-zone:hover::before,
+.drop-zone.drag-over::before { opacity: 1; }
+.drop-zone:hover,
+.drop-zone.drag-over {
+  background: rgba(245,158,11,.04);
+  border-bottom-color: rgba(245,158,11,.3);
+}
+
+.dz-icon {
+  width: 60px; height: 60px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  display: flex; align-items: center; justify-content: center;
+  margin: 0 auto 1.2rem;
+  transition: border-color .25s, transform .25s;
+}
+.drop-zone:hover .dz-icon,
+.drop-zone.drag-over .dz-icon {
+  border-color: var(--accent);
+  transform: translateY(-3px);
+}
+.dz-icon svg { width: 28px; height: 28px; color: var(--muted); transition: color .25s; }
+.drop-zone:hover .dz-icon svg,
+.drop-zone.drag-over .dz-icon svg { color: var(--accent); }
+
+.dz-title {
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: var(--text);
+  margin-bottom: 0.3rem;
+}
+.dz-sub {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: var(--muted);
+  letter-spacing: 0.06em;
+}
+.dz-filename {
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  color: var(--accent);
+  margin-top: 0.5rem;
+  font-weight: 500;
+}
+
+/* ---- STATS ROW ---- */
+.stats-row {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  border-bottom: 1px solid var(--border);
+  transition: opacity .3s, transform .3s;
+}
+.stats-row.hidden { opacity: 0; pointer-events: none; transform: translateY(-6px); }
+
+.stat-cell {
+  padding: 1.2rem 1.5rem;
+  border-right: 1px solid var(--border);
+}
+.stat-cell:last-child { border-right: none; }
+.stat-label {
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  color: var(--muted);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  margin-bottom: 0.3rem;
+}
+.stat-val {
+  font-size: 1.8rem;
+  font-weight: 800;
+  color: var(--text);
+  letter-spacing: -0.03em;
+  line-height: 1;
+}
+.stat-val.amber { color: var(--accent); }
+.stat-val.green { color: var(--green); }
+
+/* ---- PIPELINE STATUS ---- */
+.pipeline {
+  padding: 1.25rem 1.5rem;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+.pip-step {
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 0.25rem 0.6rem;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  background: var(--surface2);
+  transition: all .25s;
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+.pip-step .dot {
+  width: 5px; height: 5px;
+  border-radius: 50%;
+  background: var(--muted);
+  transition: background .25s;
+}
+.pip-step.active {
+  color: var(--accent);
+  border-color: rgba(245,158,11,.4);
+  background: rgba(245,158,11,.08);
+}
+.pip-step.active .dot {
+  background: var(--accent);
+  box-shadow: 0 0 6px var(--accent);
+  animation: pulse-dot 1s ease infinite;
+}
+.pip-step.done { color: var(--green); border-color: rgba(34,197,94,.3); background: rgba(34,197,94,.06); }
+.pip-step.done .dot { background: var(--green); }
+.pip-step.error { color: var(--red); border-color: rgba(239,68,68,.3); background: rgba(239,68,68,.06); }
+.pip-step.error .dot { background: var(--red); }
+
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: .5; transform: scale(1.4); }
+}
+
+/* ---- TERMINAL ---- */
+.terminal-wrap {
+  padding: 1rem 1.5rem;
+  border-bottom: 1px solid var(--border);
+}
+.terminal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.6rem;
+}
+.terminal-title {
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  color: var(--muted);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.terminal-dots { display: flex; gap: 5px; }
+.terminal-dots span {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: var(--border2);
+}
+
+.terminal {
+  background: #07070a;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 1rem;
+  height: 200px;
+  overflow-y: auto;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  line-height: 1.6;
+  scroll-behavior: smooth;
+}
+.terminal::-webkit-scrollbar { width: 4px; }
+.terminal::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 10px; }
+
+.log-line { display: flex; gap: 0.6rem; }
+.log-ts { color: #3a3a50; min-width: 60px; }
+.log-tag {
+  min-width: 56px;
+  font-weight: 500;
+  text-transform: uppercase;
+  font-size: 0.62rem;
+  letter-spacing: 0.06em;
+}
+.log-tag.info  { color: var(--blue); }
+.log-tag.ok    { color: var(--green); }
+.log-tag.warn  { color: var(--accent); }
+.log-tag.error { color: var(--red); }
+.log-tag.proc  { color: #c084fc; }
+.log-msg { color: var(--text); opacity: .85; flex: 1; }
+
+/* ---- PROGRESS BAR ---- */
+.progress-wrap {
+  padding: 0 1.5rem 1rem;
+  border-bottom: 1px solid var(--border);
+}
+.progress-track {
+  height: 3px;
+  background: var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+}
+.progress-fill {
+  height: 100%;
+  width: 0%;
+  background: linear-gradient(90deg, var(--accent), var(--accent2));
+  border-radius: 10px;
+  transition: width .3s ease;
+}
+.progress-label {
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  color: var(--muted);
+  margin-bottom: 0.45rem;
+  display: flex;
+  justify-content: space-between;
+}
+
+/* ---- BUTTON ---- */
+.btn-wrap { padding: 1.5rem; }
+
+.btn-split {
+  width: 100%;
+  background: var(--accent);
+  color: #0a0a0b;
+  font-family: var(--font-disp);
+  font-weight: 800;
+  font-size: 0.9rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  border: none;
+  border-radius: 10px;
+  padding: 1.1rem 1.5rem;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  transition: all .2s;
+  position: relative;
+  overflow: hidden;
+}
+.btn-split::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(135deg, rgba(255,255,255,.12), rgba(255,255,255,0));
+}
+.btn-split:hover { background: var(--accent2); transform: translateY(-1px); box-shadow: 0 12px 28px rgba(245,158,11,.25); }
+.btn-split:active { transform: translateY(0); box-shadow: none; }
+.btn-split:disabled {
+  background: var(--border2);
+  color: var(--muted);
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+.btn-split svg { width: 18px; height: 18px; }
+
+/* ---- FOOTER ---- */
+.footer {
+  margin-top: 1.5rem;
+  text-align: center;
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  color: var(--muted);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+.footer span { color: var(--border2); margin: 0 0.4rem; }
+
+/* ---- SPINNER (inside button during load) ---- */
+@keyframes spin { to { transform: rotate(360deg); } }
+.spinner {
+  width: 16px; height: 16px;
+  border: 2px solid rgba(10,10,11,.3);
+  border-top-color: #0a0a0b;
+  border-radius: 50%;
+  animation: spin .7s linear infinite;
+  display: inline-block;
+}
+
+/* ---- RESULT DOWNLOAD CARD ---- */
+.result-card {
+  display: none;
+  margin: 0 1.5rem 1.5rem;
+  background: rgba(34,197,94,.06);
+  border: 1px solid rgba(34,197,94,.25);
+  border-radius: 10px;
+  padding: 1rem 1.25rem;
+  align-items: center;
+  gap: 1rem;
+}
+.result-card.visible { display: flex; }
+.result-icon {
+  width: 40px; height: 40px;
+  background: rgba(34,197,94,.12);
+  border-radius: 8px;
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+}
+.result-icon svg { width: 20px; height: 20px; color: var(--green); }
+.result-info { flex: 1; }
+.result-title { font-weight: 700; font-size: 0.85rem; color: var(--green); }
+.result-sub { font-family: var(--font-mono); font-size: 0.65rem; color: var(--muted); margin-top: 0.15rem; }
+.btn-dl {
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  background: rgba(34,197,94,.15);
+  color: var(--green);
+  border: 1px solid rgba(34,197,94,.3);
+  border-radius: 6px;
+  padding: 0.45rem 0.9rem;
+  cursor: pointer;
+  transition: all .2s;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.btn-dl:hover { background: rgba(34,197,94,.25); }
+
+/* ---- OPENCV LOADING OVERLAY ---- */
+#cv-loading {
+  position: fixed;
+  inset: 0;
+  background: rgba(10,10,11,.92);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+  gap: 1rem;
+  transition: opacity .4s;
+}
+#cv-loading.hidden { opacity: 0; pointer-events: none; }
+#cv-loading .cv-spinner {
+  width: 48px; height: 48px;
+  border: 3px solid var(--border2);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+#cv-loading p {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  color: var(--muted);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+</style>
 </head>
-<body class="min-h-screen flex flex-col items-center justify-center p-6">
+<body>
 
-    <!-- Main Container -->
-    <div class="glass-card w-full max-w-2xl shadow-xl rounded-2xl overflow-hidden">
-        
-        <!-- Header -->
-        <div class="bg-slate-900 text-white p-8 border-b-2 border-blue-500">
-            <div class="flex items-center justify-between">
-                <div>
-                    <h1 class="text-3xl font-extrabold tracking-tight uppercase">Label Splitter 4.0</h1>
-                    <p class="text-slate-400 text-sm mt-2 font-medium">Professional Label Processing Engine</p>
-                </div>
-                <div class="bg-blue-500/10 p-3 rounded-xl border border-blue-500/20">
-                    <svg class="w-8 h-8 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"></path>
-                    </svg>
-                </div>
-            </div>
-        </div>
+<!-- OpenCV loading overlay -->
+<div id="cv-loading">
+  <div class="cv-spinner"></div>
+  <p>Loading computer vision engine...</p>
+</div>
 
-        <div class="p-8">
-            <!-- Upload Section -->
-            <div id="upload-section" class="mb-8">
-                <div class="drop-zone border-2 border-dashed border-slate-300 rounded-2xl p-12 text-center cursor-pointer relative" onclick="document.getElementById('fileInput').click()">
-                    <input type="file" id="fileInput" accept="application/pdf" class="hidden" onchange="updateFileInfo(event)">
-                    <div class="text-slate-500">
-                        <div class="bg-slate-100 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4">
-                            <svg class="w-8 h-8 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path></svg>
-                        </div>
-                        <p class="font-bold text-xl text-slate-700" id="file-status">Upload PDF File</p>
-                        <p class="text-sm mt-2 text-slate-400">Target: 4 labels per page layout</p>
-                    </div>
-                </div>
-            </div>
+<div class="shell">
 
-            <!-- Stats Dashboard -->
-            <div id="stats" class="grid grid-cols-2 gap-6 mb-8 hidden animate-in fade-in slide-in-from-bottom-4 duration-500">
-                <div class="bg-slate-50 p-5 rounded-2xl border border-slate-200">
-                    <p class="text-xs text-slate-500 uppercase font-bold tracking-wider">Input Sheets</p>
-                    <p id="inputPagesDisplay" class="text-3xl font-extrabold text-slate-800">0</p>
-                </div>
-                <div class="bg-blue-50 p-5 rounded-2xl border border-blue-100">
-                    <p class="text-xs text-blue-500 uppercase font-bold tracking-wider">Output Labels</p>
-                    <p id="labelCountDisplay" class="text-3xl font-extrabold text-blue-600">0</p>
-                </div>
-            </div>
+  <!-- Header -->
+  <div class="header">
+    <div class="header-left">
+      <div class="logo">AUTO<span>SPLIT</span></div>
+      <div class="tagline">Courier Label Intelligence Engine v5.0</div>
+    </div>
+    <div class="badge">CV + OCR Powered</div>
+  </div>
 
-            <!-- Log -->
-            <div class="mb-8">
-                <div class="flex items-center justify-between mb-3 px-1">
-                    <p class="text-xs font-bold text-slate-500 uppercase tracking-widest">Process Monitor</p>
-                    <div class="flex space-x-1">
-                        <div class="w-2 h-2 rounded-full bg-slate-300"></div>
-                        <div class="w-2 h-2 rounded-full bg-slate-300"></div>
-                        <div class="w-2 h-2 rounded-full bg-slate-300"></div>
-                    </div>
-                </div>
-                <div id="console" class="console-log">
-                    <div class="opacity-50"># Terminal initialized... ready for command.</div>
-                </div>
-            </div>
+  <!-- Main card -->
+  <div class="card">
 
-            <!-- Action -->
-            <button id="processBtn" onclick="processPDF()" class="btn-gradient w-full text-white font-bold py-5 px-8 rounded-2xl shadow-lg uppercase tracking-widest flex items-center justify-center space-x-3">
-                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
-                <span>Process & Split Labels</span>
-            </button>
-            
-            <p class="text-center text-slate-400 text-[10px] mt-6 uppercase tracking-widest">Calculated to exact 4x6 thermal printer specifications</p>
-        </div>
+    <!-- Drop zone -->
+    <div class="drop-zone" id="dropZone" onclick="document.getElementById('fileInput').click()">
+      <input type="file" id="fileInput" accept="application/pdf" class="hidden" style="display:none" />
+      <div class="dz-icon">
+        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
+            d="M9 13h6m-3-3v6m5 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414A1 1 0 0120 9.414V19a2 2 0 01-2 2z"/>
+        </svg>
+      </div>
+      <div class="dz-title" id="dzTitle">Drop PDF here or click to upload</div>
+      <div class="dz-sub">Supports all courier formats — Delhivery, Xpressbees, BlueDart, DTDC, Amazon &amp; more</div>
+      <div class="dz-filename" id="dzFilename"></div>
     </div>
 
-    <script>
-        const CM_TO_PT = 28.3465;
-        const IN_TO_PT = 72;
+    <!-- Stats row -->
+    <div class="stats-row hidden" id="statsRow">
+      <div class="stat-cell">
+        <div class="stat-label">Pages</div>
+        <div class="stat-val" id="statPages">—</div>
+      </div>
+      <div class="stat-cell">
+        <div class="stat-label">Labels Found</div>
+        <div class="stat-val amber" id="statLabels">—</div>
+      </div>
+      <div class="stat-cell">
+        <div class="stat-label">Time</div>
+        <div class="stat-val green" id="statTime">—</div>
+      </div>
+    </div>
 
-        // EXACT CROP PRESETS (cm)
-        const LABELS = [
-            { top: 0.18, bottom: 20.32, left: 2.91, right: 10.40 }, // Label 1
-            { top: 0.18, bottom: 20.32, left: 10.32, right: 2.99 }, // Label 2
-            { top: 9.34, bottom: 11.17, left: 2.99, right: 10.32 }, // Label 3
-            { top: 9.34, bottom: 11.17, left: 10.40, right: 2.91 }  // Label 4
-        ];
+    <!-- Pipeline steps -->
+    <div class="pipeline" id="pipeline">
+      <div class="pip-step" id="pip-render"><span class="dot"></span>Render</div>
+      <div class="pip-step" id="pip-detect"><span class="dot"></span>Detect</div>
+      <div class="pip-step" id="pip-contour"><span class="dot"></span>Contours</div>
+      <div class="pip-step" id="pip-barcode"><span class="dot"></span>Barcodes</div>
+      <div class="pip-step" id="pip-validate"><span class="dot"></span>Validate</div>
+      <div class="pip-step" id="pip-crop"><span class="dot"></span>Crop</div>
+      <div class="pip-step" id="pip-export"><span class="dot"></span>Export</div>
+    </div>
 
-        function log(msg, color = "#38bdf8") {
-            const consoleEl = document.getElementById('console');
-            const div = document.createElement('div');
-            div.style.color = color;
-            const timestamp = new Date().toLocaleTimeString([], { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
-            div.textContent = `[${timestamp}] ${msg}`;
-            consoleEl.appendChild(div);
-            consoleEl.scrollTop = consoleEl.scrollHeight;
+    <!-- Progress -->
+    <div class="progress-wrap">
+      <div class="progress-label">
+        <span id="progLabel">Ready</span>
+        <span id="progPct">0%</span>
+      </div>
+      <div class="progress-track">
+        <div class="progress-fill" id="progressBar"></div>
+      </div>
+    </div>
+
+    <!-- Terminal -->
+    <div class="terminal-wrap">
+      <div class="terminal-header">
+        <div class="terminal-title">Process Monitor</div>
+        <div class="terminal-dots">
+          <span></span><span></span><span></span>
+        </div>
+      </div>
+      <div class="terminal" id="terminal">
+        <div class="log-line">
+          <span class="log-ts">--:--:--</span>
+          <span class="log-tag info">SYS</span>
+          <span class="log-msg">AutoSplit v5.0 initialized. CV engine loading...</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Result download card -->
+    <div class="result-card" id="resultCard">
+      <div class="result-icon">
+        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+            d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+        </svg>
+      </div>
+      <div class="result-info">
+        <div class="result-title" id="resultTitle">Split complete!</div>
+        <div class="result-sub" id="resultSub">Ready to download</div>
+      </div>
+      <a class="btn-dl" id="resultDl" href="#" download="split_labels.pdf">Download PDF</a>
+    </div>
+
+    <!-- Action button -->
+    <div class="btn-wrap">
+      <button class="btn-split" id="btnSplit" onclick="runSplitter()">
+        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+            d="M13 10V3L4 14h7v7l9-11h-7z"/>
+        </svg>
+        <span>Split Labels</span>
+      </button>
+    </div>
+
+  </div><!-- /card -->
+
+  <div class="footer">
+    Fully client-side<span>·</span>No upload<span>·</span>No API<span>·</span>PDF.js + OpenCV.js + PDF-Lib
+  </div>
+
+</div><!-- /shell -->
+
+<!-- =====================================================================
+     JAVASCRIPT — AutoSplit Engine v5.0
+     ===================================================================== -->
+
+<!-- Load OpenCV.js from CDN -->
+<script async src="https://docs.opencv.org/4.8.0/opencv.js" onload="onOpenCvReady()" onerror="onOpenCvFail()"></script>
+
+<script>
+'use strict';
+
+/* -----------------------------------------------------------------------
+   GLOBALS
+   --------------------------------------------------------------------- */
+let cvReady = false;
+let pdfFile  = null;
+let startTime = 0;
+
+const IN_TO_PT = 72;
+const TARGET_W_IN = 4;
+const TARGET_H_IN = 6;
+
+// Render scale: higher = better detection accuracy, higher memory
+const RENDER_SCALE = 2.5;
+
+// PDF.js worker
+pdfjsLib.GlobalWorkerOptions.workerSrc =
+  'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+/* -----------------------------------------------------------------------
+   OPENCV INIT
+   --------------------------------------------------------------------- */
+function onOpenCvReady() {
+  cvReady = true;
+  document.getElementById('cv-loading').classList.add('hidden');
+  log('SYS', 'ok', 'OpenCV.js loaded — computer vision engine ready');
+}
+function onOpenCvFail() {
+  document.getElementById('cv-loading').classList.add('hidden');
+  log('SYS', 'warn', 'OpenCV.js failed to load — falling back to whitespace segmentation only');
+  cvReady = false; // will use fallback
+}
+
+/* -----------------------------------------------------------------------
+   FILE INPUT
+   --------------------------------------------------------------------- */
+const fileInput  = document.getElementById('fileInput');
+const dropZone   = document.getElementById('dropZone');
+
+fileInput.addEventListener('change', e => {
+  if (e.target.files[0]) loadFile(e.target.files[0]);
+});
+dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
+dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
+dropZone.addEventListener('drop', e => {
+  e.preventDefault();
+  dropZone.classList.remove('drag-over');
+  const f = e.dataTransfer.files[0];
+  if (f && f.type === 'application/pdf') loadFile(f);
+  else log('SYS', 'error', 'Please drop a valid PDF file');
+});
+
+function loadFile(f) {
+  pdfFile = f;
+  document.getElementById('dzTitle').textContent = f.name;
+  document.getElementById('dzFilename').textContent =
+    `${(f.size / 1024).toFixed(1)} KB — ready for processing`;
+  log('IO', 'info', `File loaded: ${f.name} (${(f.size/1024).toFixed(0)} KB)`);
+  resetResult();
+}
+
+/* -----------------------------------------------------------------------
+   LOGGING
+   --------------------------------------------------------------------- */
+function log(tag, level, msg) {
+  const t = document.getElementById('terminal');
+  const ts = new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false});
+  const line = document.createElement('div');
+  line.className = 'log-line';
+  line.innerHTML =
+    `<span class="log-ts">${ts}</span>` +
+    `<span class="log-tag ${level}">${tag}</span>` +
+    `<span class="log-msg">${msg}</span>`;
+  t.appendChild(line);
+  t.scrollTop = t.scrollHeight;
+}
+
+/* -----------------------------------------------------------------------
+   PIPELINE UI
+   --------------------------------------------------------------------- */
+const STEPS = ['render','detect','contour','barcode','validate','crop','export'];
+
+function pipSet(id, state) {
+  const el = document.getElementById('pip-' + id);
+  if (!el) return;
+  el.className = 'pip-step ' + state;
+}
+function pipActive(id) { pipSet(id, 'active'); }
+function pipDone(id)   { pipSet(id, 'done'); }
+function pipError(id)  { pipSet(id, 'error'); }
+function resetPipeline() {
+  STEPS.forEach(s => pipSet(s, ''));
+}
+
+function setProgress(pct, label) {
+  document.getElementById('progressBar').style.width = pct + '%';
+  document.getElementById('progPct').textContent = Math.round(pct) + '%';
+  document.getElementById('progLabel').textContent = label;
+}
+
+/* -----------------------------------------------------------------------
+   MAIN ENTRY POINT
+   --------------------------------------------------------------------- */
+async function runSplitter() {
+  if (!pdfFile) {
+    log('SYS', 'error', 'No file selected — please upload a PDF first');
+    return;
+  }
+
+  const btn = document.getElementById('btnSplit');
+  btn.disabled = true;
+  btn.innerHTML = `<div class="spinner"></div><span>Analyzing PDF...</span>`;
+  resetResult();
+  resetPipeline();
+  setProgress(0, 'Starting...');
+  startTime = Date.now();
+
+  document.getElementById('statsRow').classList.remove('hidden');
+
+  try {
+    const labels = await detectAndSplitPDF(pdfFile);
+
+    const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+    document.getElementById('statTime').textContent = elapsed + 's';
+
+    log('SYS', 'ok', `✓ Complete — ${labels.count} labels extracted in ${elapsed}s`);
+    setProgress(100, 'Done');
+    pipDone('export');
+
+    showResult(labels.blob, labels.count, elapsed);
+
+  } catch (err) {
+    log('SYS', 'error', 'Fatal error: ' + err.message);
+    setProgress(0, 'Error');
+    console.error(err);
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = `
+      <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+          d="M13 10V3L4 14h7v7l9-11h-7z"/>
+      </svg>
+      <span>Split Labels</span>`;
+  }
+}
+
+/* -----------------------------------------------------------------------
+   CORE PIPELINE
+   --------------------------------------------------------------------- */
+async function detectAndSplitPDF(file) {
+  const arrayBuffer = await file.arrayBuffer();
+
+  // ── STAGE 1: LOAD PDF ──────────────────────────────────────────────
+  log('PDF', 'info', 'Loading PDF document...');
+  const [pdfJsDoc, pdfLibSrc] = await Promise.all([
+    pdfjsLib.getDocument({ data: arrayBuffer.slice(0) }).promise,
+    PDFLib.PDFDocument.load(arrayBuffer.slice(0))
+  ]);
+
+  const numPages = pdfJsDoc.numPages;
+  document.getElementById('statPages').textContent = numPages;
+  log('PDF', 'info', `Document loaded — ${numPages} page(s)`);
+
+  const outPdf = await PDFLib.PDFDocument.create();
+  let totalLabels = 0;
+
+  // ── STAGE 2: PER-PAGE PROCESSING ──────────────────────────────────
+  for (let pageIdx = 0; pageIdx < numPages; pageIdx++) {
+    const pageNum = pageIdx + 1;
+    const pct = (pageIdx / numPages) * 85;
+    setProgress(pct, `Processing page ${pageNum} of ${numPages}`);
+
+    log('PAGE', 'proc', `Analyzing page ${pageNum}/${numPages}...`);
+    pipActive('render');
+
+    // Render page to canvas
+    const canvas = await renderPageToCanvas(pdfJsDoc, pageNum, RENDER_SCALE);
+    pipDone('render');
+
+    // Detect label regions
+    pipActive('detect');
+    log('CV', 'info', `Page ${pageNum}: Running detection pipeline...`);
+    const srcPage = pdfLibSrc.getPage(pageIdx);
+    const pageSize = srcPage.getSize();
+
+    let regions = [];
+
+    // Primary: OpenCV contour detection
+    pipActive('contour');
+    if (cvReady) {
+      try {
+        regions = detectLabelsOpenCV(canvas, pageSize);
+        log('CV', 'info', `OpenCV: found ${regions.length} candidate region(s)`);
+      } catch(e) {
+        log('CV', 'warn', 'OpenCV detection error, trying fallback: ' + e.message);
+        regions = [];
+      }
+    }
+
+    // Secondary: Whitespace segmentation (always run, merge/use if CV found nothing)
+    pipActive('barcode');
+    const wsRegions = detectLabelsWhitespace(canvas, pageSize);
+    log('CV', 'info', `Whitespace: found ${wsRegions.length} candidate region(s)`);
+
+    // Merge strategies
+    if (regions.length === 0) {
+      regions = wsRegions;
+    } else {
+      // Use whichever gives the higher confidence count
+      regions = pickBestRegions(regions, wsRegions, canvas, pageSize);
+    }
+
+    pipDone('contour');
+    pipDone('barcode');
+
+    // Validate regions
+    pipActive('validate');
+    regions = validateRegions(regions, canvas);
+    log('CV', 'ok', `Validated ${regions.length} label region(s) on page ${pageNum}`);
+    pipDone('validate');
+
+    if (regions.length === 0) {
+      // Last resort: treat entire page as one label
+      log('CV', 'warn', `Page ${pageNum}: no regions detected — treating full page as 1 label`);
+      regions = [fullPageRegion(pageSize)];
+    }
+
+    // ── STAGE 3: CROP & EMBED ──────────────────────────────────────
+    pipActive('crop');
+    for (let ri = 0; ri < regions.length; ri++) {
+      const reg = regions[ri];
+
+      // Convert normalised [0-1] coords → PDF points
+      const cropBox = {
+        left:   reg.x * pageSize.width,
+        bottom: (1 - reg.y - reg.h) * pageSize.height,
+        right:  (reg.x + reg.w) * pageSize.width,
+        top:    (1 - reg.y) * pageSize.height,
+      };
+
+      // Clamp to page bounds
+      cropBox.left   = Math.max(0, cropBox.left);
+      cropBox.bottom = Math.max(0, cropBox.bottom);
+      cropBox.right  = Math.min(pageSize.width,  cropBox.right);
+      cropBox.top    = Math.min(pageSize.height, cropBox.top);
+
+      if ((cropBox.right - cropBox.left) < 20 || (cropBox.top - cropBox.bottom) < 20) {
+        log('CV', 'warn', `Region ${ri+1} on page ${pageNum} too small — skipping`);
+        continue;
+      }
+
+      try {
+        const [embedded] = await outPdf.embedPages(
+          [srcPage],
+          [{ left: cropBox.left, bottom: cropBox.bottom, right: cropBox.right, top: cropBox.top }]
+        );
+
+        // Create 4×6 output page
+        const outPage = outPdf.addPage([TARGET_W_IN * IN_TO_PT, TARGET_H_IN * IN_TO_PT]);
+        const pw = outPage.getWidth();
+        const ph = outPage.getHeight();
+
+        // Scale to fit (maintain aspect ratio)
+        const scale = Math.min(pw / embedded.width, ph / embedded.height);
+        const dw = embedded.width  * scale;
+        const dh = embedded.height * scale;
+        const dx = (pw - dw) / 2;
+        const dy = (ph - dh) / 2;
+
+        outPage.drawPage(embedded, { x: dx, y: dy, width: dw, height: dh });
+        totalLabels++;
+
+      } catch (e) {
+        log('CROP', 'error', `Failed to embed region ${ri+1} on page ${pageNum}: ${e.message}`);
+      }
+    }
+    pipDone('crop');
+
+    // Free canvas memory
+    canvas.width = 1;
+    canvas.height = 1;
+    canvas.remove();
+
+    document.getElementById('statLabels').textContent = totalLabels;
+  }
+
+  // ── STAGE 4: EXPORT PDF ───────────────────────────────────────────
+  pipActive('export');
+  setProgress(95, 'Generating output PDF...');
+  log('OUT', 'info', 'Compiling output PDF...');
+  const pdfBytes = await outPdf.save();
+  const blob = new Blob([pdfBytes], { type: 'application/pdf' });
+
+  return { blob, count: totalLabels };
+}
+
+/* -----------------------------------------------------------------------
+   RENDER PAGE TO CANVAS via PDF.js
+   --------------------------------------------------------------------- */
+async function renderPageToCanvas(pdfJsDoc, pageNum, scale) {
+  const page = await pdfJsDoc.getPage(pageNum);
+  const viewport = page.getViewport({ scale });
+  const canvas = document.createElement('canvas');
+  canvas.width  = Math.floor(viewport.width);
+  canvas.height = Math.floor(viewport.height);
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  await page.render({ canvasContext: ctx, viewport }).promise;
+  return canvas;
+}
+
+/* -----------------------------------------------------------------------
+   OPENCV CONTOUR-BASED LABEL DETECTION
+   Returns array of { x, y, w, h } in normalised [0-1] coords
+   --------------------------------------------------------------------- */
+function detectLabelsOpenCV(canvas, pageSize) {
+  const cv   = window.cv;
+  const src  = cv.imread(canvas);
+  const gray = new cv.Mat();
+  const blur = new cv.Mat();
+  const edge = new cv.Mat();
+  const hier = new cv.Mat();
+  const cnts = new cv.MatVector();
+
+  cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
+  cv.GaussianBlur(gray, blur, new cv.Size(5, 5), 0);
+
+  // Adaptive threshold for handling both scanned and generated PDFs
+  const thresh = new cv.Mat();
+  cv.adaptiveThreshold(blur, thresh, 255,
+    cv.ADAPTIVE_THRESH_GAUSSIAN_C, cv.THRESH_BINARY_INV, 21, 8);
+
+  // Morphological close to fill gaps in label borders
+  const kernel = cv.getStructuringElement(cv.MORPH_RECT, new cv.Size(15, 15));
+  const morph  = new cv.Mat();
+  cv.morphologyEx(thresh, morph, cv.MORPH_CLOSE, kernel);
+
+  cv.findContours(morph, cnts, hier, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
+
+  const cW = canvas.width;
+  const cH = canvas.height;
+  const minAreaFrac = 0.02;   // label must be at least 2% of page area
+  const maxAreaFrac = 0.98;   // and less than 98%
+  const pageArea = cW * cH;
+
+  const regions = [];
+
+  for (let i = 0; i < cnts.size(); i++) {
+    const cnt = cnts.get(i);
+    const rect = cv.boundingRect(cnt);
+    const area = rect.width * rect.height;
+    const frac = area / pageArea;
+
+    if (frac >= minAreaFrac && frac <= maxAreaFrac) {
+      // Add 1% padding
+      const pad = 0.01;
+      regions.push({
+        x: Math.max(0, (rect.x / cW) - pad),
+        y: Math.max(0, (rect.y / cH) - pad),
+        w: Math.min(1, (rect.width  / cW) + pad * 2),
+        h: Math.min(1, (rect.height / cH) + pad * 2),
+        area: frac,
+        method: 'opencv'
+      });
+    }
+    cnt.delete();
+  }
+
+  // Cleanup
+  [src, gray, blur, edge, thresh, morph, hier, kernel].forEach(m => { try { m.delete(); } catch(e){} });
+  cnts.delete();
+
+  return mergeOverlappingRegions(regions);
+}
+
+/* -----------------------------------------------------------------------
+   WHITESPACE SEGMENTATION FALLBACK
+   Splits page by detecting horizontal & vertical whitespace bands
+   Returns array of { x, y, w, h } in normalised [0-1] coords
+   --------------------------------------------------------------------- */
+function detectLabelsWhitespace(canvas, pageSize) {
+  const ctx  = canvas.getContext('2d', { willReadFrequently: true });
+  const cW   = canvas.width;
+  const cH   = canvas.height;
+  const data = ctx.getImageData(0, 0, cW, cH).data;
+
+  // Build row and column darkness profiles
+  // "dark" = pixel with luminance < threshold (content present)
+  const THRESH = 245;  // near-white background
+
+  function rowHasContent(y) {
+    for (let x = 0; x < cW; x++) {
+      const idx = (y * cW + x) * 4;
+      const lum = 0.299 * data[idx] + 0.587 * data[idx+1] + 0.114 * data[idx+2];
+      if (lum < THRESH) return true;
+    }
+    return false;
+  }
+  function colHasContent(x, y0, y1) {
+    for (let y = y0; y < y1; y++) {
+      const idx = (y * cW + x) * 4;
+      const lum = 0.299 * data[idx] + 0.587 * data[idx+1] + 0.114 * data[idx+2];
+      if (lum < THRESH) return true;
+    }
+    return false;
+  }
+
+  // Find horizontal bands with content
+  const rowContent = new Uint8Array(cH);
+  for (let y = 0; y < cH; y++) rowContent[y] = rowHasContent(y) ? 1 : 0;
+
+  const hBands = findContentBands(rowContent, Math.floor(cH * 0.01));
+
+  if (hBands.length === 0) return [];
+
+  const regions = [];
+
+  for (const band of hBands) {
+    const y0 = band.start;
+    const y1 = band.end;
+
+    // Within each horizontal band, find vertical content segments
+    const colContent = new Uint8Array(cW);
+    for (let x = 0; x < cW; x++) colContent[x] = colHasContent(x, y0, y1) ? 1 : 0;
+
+    const vBands = findContentBands(colContent, Math.floor(cW * 0.01));
+
+    if (vBands.length === 0) {
+      // Full-width band
+      regions.push({
+        x: 0, y: y0 / cH,
+        w: 1,  h: (y1 - y0) / cH,
+        area: (y1 - y0) / cH,
+        method: 'whitespace'
+      });
+    } else {
+      for (const vb of vBands) {
+        const pad = 0.008;
+        regions.push({
+          x: Math.max(0, vb.start / cW - pad),
+          y: Math.max(0, y0 / cH - pad),
+          w: Math.min(1, (vb.end - vb.start) / cW + pad * 2),
+          h: Math.min(1, (y1 - y0) / cH + pad * 2),
+          area: ((vb.end - vb.start) / cW) * ((y1 - y0) / cH),
+          method: 'whitespace'
+        });
+      }
+    }
+  }
+
+  return mergeOverlappingRegions(regions);
+}
+
+/* -----------------------------------------------------------------------
+   FIND CONTENT BANDS in a binary 1D array
+   (groups of consecutive 1s, ignoring gaps smaller than minGap)
+   --------------------------------------------------------------------- */
+function findContentBands(arr, minGap) {
+  const bands = [];
+  let inBand = false;
+  let start = 0;
+  let gapCount = 0;
+  const minBandLen = Math.floor(arr.length * 0.04);
+
+  for (let i = 0; i < arr.length; i++) {
+    if (arr[i]) {
+      if (!inBand) { inBand = true; start = i; }
+      gapCount = 0;
+    } else {
+      if (inBand) {
+        gapCount++;
+        if (gapCount > minGap) {
+          if (i - start - gapCount >= minBandLen) {
+            bands.push({ start, end: i - gapCount });
+          }
+          inBand = false; gapCount = 0;
         }
+      }
+    }
+  }
+  if (inBand && arr.length - start >= minBandLen) {
+    bands.push({ start, end: arr.length - 1 });
+  }
+  return bands;
+}
 
-        function updateFileInfo(event) {
-            const file = event.target.files[0];
-            if (file) {
-                document.getElementById('file-status').innerText = file.name;
-                log(`IO: File stream opened - ${file.name}`);
-            }
-        }
+/* -----------------------------------------------------------------------
+   MERGE OVERLAPPING REGIONS (IoU-based NMS)
+   --------------------------------------------------------------------- */
+function mergeOverlappingRegions(regions) {
+  if (regions.length <= 1) return regions;
 
-        async function processPDF() {
-            const fileInput = document.getElementById("fileInput");
-            if (!fileInput.files.length) {
-                log("FAIL: Missing input stream", "#f87171");
-                return;
-            }
+  // Sort by area descending
+  regions.sort((a, b) => b.area - a.area);
 
-            const processBtn = document.getElementById('processBtn');
-            processBtn.disabled = true;
-            processBtn.classList.add('opacity-50', 'cursor-not-allowed');
+  const keep = [];
+  const used = new Array(regions.length).fill(false);
 
-            log("START: Initializing PDF processing core...");
-            const file = fileInput.files[0];
-            const arrayBuffer = await file.arrayBuffer();
+  for (let i = 0; i < regions.length; i++) {
+    if (used[i]) continue;
+    const a = regions[i];
+    keep.push(a);
+    for (let j = i + 1; j < regions.length; j++) {
+      if (used[j]) continue;
+      if (iou(a, regions[j]) > 0.3) used[j] = true;
+    }
+  }
 
-            const srcPdf = await PDFLib.PDFDocument.load(arrayBuffer);
-            const outPdf = await PDFLib.PDFDocument.create();
-            const pages = srcPdf.getPages();
-            
-            document.getElementById('stats').classList.remove('hidden');
-            document.getElementById('inputPagesDisplay').innerText = pages.length;
-            document.getElementById('labelCountDisplay').innerText = pages.length * 4;
+  return keep;
+}
 
-            let totalLabelsProcessed = 0;
+function iou(a, b) {
+  const ix = Math.max(0, Math.min(a.x+a.w, b.x+b.w) - Math.max(a.x, b.x));
+  const iy = Math.max(0, Math.min(a.y+a.h, b.y+b.h) - Math.max(a.y, b.y));
+  const inter = ix * iy;
+  const union = a.w*a.h + b.w*b.h - inter;
+  return union > 0 ? inter / union : 0;
+}
 
-            for (let i = 0; i < pages.length; i++) {
-                const page = pages[i];
-                const { width, height } = page.getSize();
-                log(`PROC: Slicing Sheet ${i + 1} of ${pages.length}...`);
+/* -----------------------------------------------------------------------
+   PICK BEST REGION SET (opencv vs whitespace)
+   --------------------------------------------------------------------- */
+function pickBestRegions(cvRegions, wsRegions, canvas, pageSize) {
+  // Score each set: more regions with valid label aspect ratios = better
+  const score = (regs) => regs.reduce((acc, r) => {
+    const ratio = r.h > 0 ? r.w / r.h : 0;
+    // Typical label aspect ratios: 4×6 = 0.67, 6×4 = 1.5, square-ish = 0.8-1.2
+    const validRatio = (ratio > 0.3 && ratio < 3.5) ? 1 : 0.2;
+    return acc + validRatio;
+  }, 0);
 
-                for (let j = 0; j < LABELS.length; j++) {
-                    const l = LABELS[j];
-                    
-                    const cropBox = {
-                        left: l.left * CM_TO_PT,
-                        bottom: l.bottom * CM_TO_PT,
-                        right: width - (l.right * CM_TO_PT),
-                        top: height - (l.top * CM_TO_PT)
-                    };
+  return score(cvRegions) >= score(wsRegions) ? cvRegions : wsRegions;
+}
 
-                    const [embedded] = await outPdf.embedPages([page], [cropBox]);
+/* -----------------------------------------------------------------------
+   VALIDATE REGIONS
+   Filter out noise: too small, wrong aspect, suspiciously thin strips
+   --------------------------------------------------------------------- */
+function validateRegions(regions, canvas) {
+  const cW = canvas.width;
+  const cH = canvas.height;
 
-                    // Create EXACT 4x6 inch page
-                    const newPage = outPdf.addPage([4 * IN_TO_PT, 6 * IN_TO_PT]);
+  return regions.filter(r => {
+    const wPx = r.w * cW;
+    const hPx = r.h * cH;
+    const ratio = wPx / hPx;
 
-                    const pageW = newPage.getWidth();
-                    const pageH = newPage.getHeight();
+    if (wPx < 40 || hPx < 40) return false;           // Too small
+    if (r.area < 0.015)       return false;            // Less than 1.5% of page
+    if (ratio < 0.15 || ratio > 8) return false;       // Extreme strip
+    return true;
+  });
+}
 
-                    const labelW = embedded.width;
-                    const labelH = embedded.height;
+/* -----------------------------------------------------------------------
+   FULL-PAGE FALLBACK REGION
+   --------------------------------------------------------------------- */
+function fullPageRegion(pageSize) {
+  return { x: 0.005, y: 0.005, w: 0.99, h: 0.99, area: 0.98, method: 'fullpage' };
+}
 
-                    const scale = Math.min(
-                        pageW / labelW,
-                        pageH / labelH
-                    );
+/* -----------------------------------------------------------------------
+   SHOW RESULT
+   --------------------------------------------------------------------- */
+function showResult(blob, count, elapsed) {
+  const url  = URL.createObjectURL(blob);
+  const card = document.getElementById('resultCard');
+  const dl   = document.getElementById('resultDl');
+  const ts   = new Date().getTime();
 
-                    const drawW = labelW * scale;
-                    const drawH = labelH * scale;
+  dl.href     = url;
+  dl.download = `split_labels_${ts}.pdf`;
+  document.getElementById('resultTitle').textContent = `${count} label(s) extracted successfully`;
+  document.getElementById('resultSub').textContent   = `Processed in ${elapsed}s · 4×6 thermal-ready pages`;
+  card.classList.add('visible');
 
-                    const x = (pageW - drawW) / 2;
-                    const y = (pageH - drawH) / 2;
+  // Auto-trigger download
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `split_labels_${ts}.pdf`;
+  a.click();
+}
 
-                    newPage.drawPage(embedded, {
-                        x: x,
-                        y: y,
-                        width: drawW,
-                        height: drawH
-                    });
-
-                    totalLabelsProcessed++;
-                }
-            }
-
-            log(`VERIFY: Integrity check ${totalLabelsProcessed}/${pages.length * 4}`);
-            if (totalLabelsProcessed !== pages.length * 4) {
-                log("CRITICAL: PARSING MISMATCH DETECTED", "#f87171");
-                processBtn.disabled = false;
-                processBtn.classList.remove('opacity-50', 'cursor-not-allowed');
-                return;
-            }
-
-            const pdfBytes = await outPdf.save();
-            const blob = new Blob([pdfBytes], { type: "application/pdf" });
-            const url = URL.createObjectURL(blob);
-
-            const a = document.createElement("a");
-            a.href = url;
-            a.download = `split_labels_${new Date().getTime()}.pdf`;
-            a.click();
-
-            log("SUCCESS: PDF compiled and exported.", "#4ade80");
-            processBtn.disabled = false;
-            processBtn.classList.remove('opacity-50', 'cursor-not-allowed');
-        }
-    </script>
+function resetResult() {
+  document.getElementById('resultCard').classList.remove('visible');
+}
+</script>
 </body>
 </html>
